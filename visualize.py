@@ -120,9 +120,9 @@ class App:
         pygame.display.set_caption("GridWorld – Q-Learning")
         self.clock = pygame.time.Clock()
 
-        self.f_lg = pygame.font.SysFont("Arial", 21, bold=True)
-        self.f_md = pygame.font.SysFont("Arial", 17)
-        self.f_sm = pygame.font.SysFont("Arial", 13)
+        self.f_lg = pygame.font.Font(None, 28)
+        self.f_md = pygame.font.Font(None, 22)
+        self.f_sm = pygame.font.Font(None, 17)
 
         self.world_idx  = 2
         self.trained    = False
