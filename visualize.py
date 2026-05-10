@@ -2,6 +2,7 @@ import pygame
 import numpy as np
 import random
 from GridWorld import GridWorld, Agent, train as rl_train
+from agent_dqn import DQN, ReplayBuffer, train_dqn
 
 # ── Palette ────────────────────────────────────────────────────────────────────
 BG        = (28,  28,  38)
@@ -69,8 +70,10 @@ def draw_arrow(surf, color, cx, cy, direction, half):
     pygame.draw.polygon(surf, color, pts)
 
 
-def best_action(qtable, state):
-    return max(ACTIONS, key=lambda a: qtable[(state, a)])
+def best_action(agent, state, mode):
+    if mode == 'dqn':
+        return agent.choose_action(epsilon=0, state=state)
+    return max(ACTIONS, key=lambda a: agent.qtable[(state, a)])
 
 
 def reachable(grid, start, goal):
@@ -116,7 +119,8 @@ def random_world(rows, cols, start):
 class App:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((WIN_W, WIN_H))
+        self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
+        self.sw, self.sh = WIN_W, WIN_H
         pygame.display.set_caption("GridWorld – Q-Learning")
         self.clock = pygame.time.Clock()
 
@@ -133,10 +137,12 @@ class App:
         self.anim_t     = 0
         self.status     = "Click a floor cell to set start · then Train"
 
+        self.mode        = 'ql'
         self.world_btns  = []
         self.train_btn   = pygame.Rect(0, 0, 0, 0)
         self.run_btn     = pygame.Rect(0, 0, 0, 0)
         self.rand_btn    = pygame.Rect(0, 0, 0, 0)
+        self.mode_btn    = pygame.Rect(0, 0, 0, 0)
 
         self._load_world()
 
@@ -152,8 +158,8 @@ class App:
         self._reset_training()
 
     def _recalc_layout(self):
-        area_w = WIN_W - SB_W - 2 * PAD
-        area_h = WIN_H - TOP_H - 2 * PAD
+        area_w = self.sw - SB_W - 2 * PAD
+        area_h = self.sh - TOP_H - 2 * PAD
         self.cell = min(MAX_CELL, area_w // self.cols, area_h // self.rows)
         total_w = self.cols * self.cell
         total_h = self.rows * self.cell
@@ -194,8 +200,13 @@ class App:
         self._draw()
         pygame.display.flip()
         gw = GridWorld(self.world_arr.copy(), self.start, REWARDS, 0.9)
-        ag = Agent(gw, ACTIONS)
-        rl_train(gw, ag, episodes=5000, epsilon=0.3, alpha=0.1, gamma=0.9)
+        if self.mode == 'dqn':
+            ag = DQN(ACTIONS)
+            buf = ReplayBuffer(capacity=10000)
+            train_dqn(gw, ag, buf, episodes=5000, epsilon=0.3, alpha=0.001, gamma=0.9)
+        else:
+            ag = Agent(gw, ACTIONS)
+            rl_train(gw, ag, episodes=5000, epsilon=0.3, alpha=0.1, gamma=0.9)
         self.agent   = ag
         self.trained = True
         self.status  = "Trained!  Click Run to watch the agent"
@@ -206,7 +217,7 @@ class App:
         gw   = GridWorld(self.world_arr.copy(), self.start, REWARDS, 0.9)
         path = [gw.current_pos]
         for _ in range(200):
-            a = best_action(self.agent.qtable, gw.current_pos)
+            a = best_action(self.agent, gw.current_pos, self.mode)
             pos, _, done = gw.step(a)
             path.append(pos)
             if done:
@@ -223,13 +234,13 @@ class App:
     # ── Drawing ────────────────────────────────────────────────────────────────
 
     def _draw_topbar(self):
-        pygame.draw.rect(self.screen, PANEL, (0, 0, WIN_W, TOP_H))
-        pygame.draw.line(self.screen, BG, (0, TOP_H), (WIN_W, TOP_H), 2)
+        pygame.draw.rect(self.screen, PANEL, (0, 0, self.sw, TOP_H))
+        pygame.draw.line(self.screen, BG, (0, TOP_H), (self.sw, TOP_H), 2)
         title = self.f_lg.render("GridWorld  ·  Q-Learning", True, TEXT_LT)
         self.screen.blit(title, (PAD, TOP_H // 2 - title.get_height() // 2))
         status = self.f_md.render(self.status, True, ACCENT)
         self.screen.blit(status, status.get_rect(
-            midright=(WIN_W - SB_W - PAD, TOP_H // 2)))
+            midright=(self.sw - SB_W - PAD, TOP_H // 2)))
 
     def _draw_grid(self):
         mx, my = pygame.mouse.get_pos()
@@ -266,7 +277,7 @@ class App:
                         self.screen.blit(lbl, (rect.x + 5, rect.y + 4))
                     if self.trained:
                         draw_arrow(self.screen, ARROW_CLR, cx, cy,
-                                   best_action(self.agent.qtable, (r, c)), half)
+                                   best_action(self.agent, (r, c), self.mode), half)
 
         # agent circle
         if self.animating and self.anim_step < len(self.anim_path):
@@ -277,9 +288,9 @@ class App:
                                self.cell // 3, 3)
 
     def _draw_sidebar(self):
-        sbx = WIN_W - SB_W
-        pygame.draw.rect(self.screen, PANEL, (sbx, 0, SB_W, WIN_H))
-        pygame.draw.line(self.screen, BG, (sbx, 0), (sbx, WIN_H), 2)
+        sbx = self.sw - SB_W
+        pygame.draw.rect(self.screen, PANEL, (sbx, 0, SB_W, self.sh))
+        pygame.draw.line(self.screen, BG, (sbx, 0), (sbx, self.sh), 2)
 
         y = TOP_H + 14
         self.screen.blit(self.f_lg.render("World", True, TEXT_LT), (sbx + 16, y))
@@ -296,6 +307,13 @@ class App:
             y += 41
 
         y += 8
+
+        self.mode_btn = pygame.Rect(sbx + 12, y, SB_W - 24, 34)
+        mode_label = "Mode: Q-Learn" if self.mode == 'ql' else "Mode: DQN"
+        pygame.draw.rect(self.screen, BTN_RAND, self.mode_btn, border_radius=8)
+        lbl = self.f_md.render(mode_label, True, (255, 255, 255))
+        self.screen.blit(lbl, lbl.get_rect(center=self.mode_btn.center))
+        y += 42
 
         self.rand_btn = pygame.Rect(sbx + 12, y, SB_W - 24, 34)
         pygame.draw.rect(self.screen, BTN_RAND, self.rand_btn, border_radius=8)
@@ -346,6 +364,11 @@ class App:
 
     def _step(self):
         """Process one frame. Returns False when the app should quit."""
+        sw, sh = self.screen.get_size()
+        if (sw, sh) != (self.sw, self.sh):
+            self.sw, self.sh = sw, sh
+            self._recalc_layout()
+
         now = pygame.time.get_ticks()
 
         if self.animating:
@@ -378,6 +401,10 @@ class App:
                     if btn.collidepoint(mx, my):
                         self.world_idx = idx
                         self._load_world()
+                if self.mode_btn.collidepoint(mx, my):
+                    self.mode = 'dqn' if self.mode == 'ql' else 'ql'
+                    self._reset_training()
+                    self.status = f"Mode: {'DQN' if self.mode == 'dqn' else 'Q-Learning'}  · Click Train"
                 if self.rand_btn.collidepoint(mx, my):
                     self._randomize()
                 if self.train_btn.collidepoint(mx, my):

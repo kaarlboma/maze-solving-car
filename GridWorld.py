@@ -79,7 +79,7 @@ class Agent:
         """
         best_qval = self.qtable[(next_state, 'U')]
         for a in self.actions:
-            if self.qtable[(next_state, action)] > best_qval:
+            if self.qtable[(next_state, a)] > best_qval:
                 best_qval = self.qtable[(next_state, a)]
         self.qtable[(state, action)] = self.qtable[(state, action)] + (alpha * (reward + (gamma * best_qval) - self.qtable[(state, action)]))
         
